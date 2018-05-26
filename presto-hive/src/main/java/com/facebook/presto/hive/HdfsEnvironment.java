@@ -49,7 +49,8 @@ public class HdfsEnvironment
             HdfsAuthentication hdfsAuthentication)
     {
         this.hdfsConfiguration = requireNonNull(hdfsConfiguration, "hdfsConfiguration is null");
-        this.verifyChecksum = requireNonNull(config, "config is null").isVerifyChecksum();
+        this.verifyChecksum = false;
+//        this.verifyChecksum = requireNonNull(config, "config is null").isVerifyChecksum();
         this.hdfsAuthentication = requireNonNull(hdfsAuthentication, "hdfsAuthentication is null");
     }
 

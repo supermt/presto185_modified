@@ -64,11 +64,22 @@ import static java.util.Objects.requireNonNull;
 public abstract class PlanNode
 {
     private final PlanNodeId id;
+    private boolean isRoot = false;
 
     protected PlanNode(PlanNodeId id)
     {
         requireNonNull(id, "id is null");
         this.id = id;
+    }
+
+    public boolean isRoot()
+    {
+        return isRoot;
+    }
+
+    public void setRoot(boolean root)
+    {
+        isRoot = root;
     }
 
     @JsonProperty("id")

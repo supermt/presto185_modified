@@ -34,7 +34,6 @@ public class HiveSplit
         implements ConnectorSplit
 {
     private final String clientId;
-    private final String path;
     private final long start;
     private final long length;
     private final long fileSize;
@@ -48,6 +47,7 @@ public class HiveSplit
     private final OptionalInt bucketNumber;
     private final boolean forceLocalScheduling;
     private final Map<Integer, HiveType> columnCoercions;
+    private String path;
 
     @JsonCreator
     public HiveSplit(
@@ -222,5 +222,17 @@ public class HiveSplit
                 .addValue(fileSize)
                 .addValue(effectivePredicate)
                 .toString();
+    }
+
+    @Override
+    public boolean withParam()
+    {
+        return true;
+    }
+
+    @Override
+    public void setParam(String condition)
+    {
+        path = path + "?" + condition;
     }
 }

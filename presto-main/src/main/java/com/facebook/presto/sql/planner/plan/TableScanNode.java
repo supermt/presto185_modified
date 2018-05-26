@@ -83,6 +83,7 @@ public class TableScanNode
         this.originalConstraint = originalConstraint;
         this.tableLayout = tableLayout;
         this.currentConstraint = currentConstraint;
+        this.setRoot(true);
     }
 
     @JsonProperty("table")

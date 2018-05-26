@@ -22,4 +22,14 @@ public interface ConnectorSplit
     List<HostAddress> getAddresses();
 
     Object getInfo();
+
+    default boolean withParam()
+    {
+        return false;
+    }
+
+    default void setParam(String condition)
+    {
+        return;
+    }
 }

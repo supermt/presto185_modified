@@ -33,6 +33,9 @@ import com.facebook.presto.server.TaskUpdateRequest;
 import com.facebook.presto.sql.planner.PlanFragment;
 import com.facebook.presto.sql.planner.plan.PlanNode;
 import com.facebook.presto.sql.planner.plan.PlanNodeId;
+import com.facebook.presto.sql.planner.plan.TableScanNode;
+import com.facebook.presto.sql.tree.BooleanLiteral;
+import com.facebook.presto.sql.tree.Expression;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Multimap;
@@ -57,11 +60,13 @@ import javax.annotation.concurrent.GuardedBy;
 import java.net.URI;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Future;
@@ -111,44 +116,35 @@ public final class HttpRemoteTask
     private final RemoteTaskStats stats;
     private final TaskInfoFetcher taskInfoFetcher;
     private final ContinuousTaskStatusFetcher taskStatusFetcher;
-
-    @GuardedBy("this")
-    private Future<?> currentRequest;
-    @GuardedBy("this")
-    private long currentRequestStartNanos;
-
     @GuardedBy("this")
     private final SetMultimap<PlanNodeId, ScheduledSplit> pendingSplits = HashMultimap.create();
-    @GuardedBy("this")
-    private volatile int pendingSourceSplitCount;
     @GuardedBy("this")
     private final Set<PlanNodeId> noMoreSplits = new HashSet<>();
     @GuardedBy("this")
     private final AtomicReference<OutputBuffers> outputBuffers = new AtomicReference<>();
     private final FutureStateChange<?> whenSplitQueueHasSpace = new FutureStateChange<>();
+    private final boolean summarizeTaskInfo;
+    private final Duration requestTimeout;
+    private final HttpClient httpClient;
+    private final Executor executor;
+    private final ScheduledExecutorService errorScheduledExecutor;
+    private final JsonCodec<TaskInfo> taskInfoCodec;
+    private final JsonCodec<TaskUpdateRequest> taskUpdateRequestCodec;
+    private final RequestErrorTracker updateErrorTracker;
+    private final AtomicBoolean needsUpdate = new AtomicBoolean(true);
+    private final AtomicBoolean sendPlan = new AtomicBoolean(true);
+    private final PartitionedSplitCountTracker partitionedSplitCountTracker;
+    private final AtomicBoolean aborting = new AtomicBoolean(false);
+    @GuardedBy("this")
+    private Future<?> currentRequest;
+    @GuardedBy("this")
+    private long currentRequestStartNanos;
+    @GuardedBy("this")
+    private volatile int pendingSourceSplitCount;
     @GuardedBy("this")
     private boolean splitQueueHasSpace = true;
     @GuardedBy("this")
     private OptionalInt whenSplitQueueHasSpaceThreshold = OptionalInt.empty();
-
-    private final boolean summarizeTaskInfo;
-    private final Duration requestTimeout;
-
-    private final HttpClient httpClient;
-    private final Executor executor;
-    private final ScheduledExecutorService errorScheduledExecutor;
-
-    private final JsonCodec<TaskInfo> taskInfoCodec;
-    private final JsonCodec<TaskUpdateRequest> taskUpdateRequestCodec;
-
-    private final RequestErrorTracker updateErrorTracker;
-
-    private final AtomicBoolean needsUpdate = new AtomicBoolean(true);
-    private final AtomicBoolean sendPlan = new AtomicBoolean(true);
-
-    private final PartitionedSplitCountTracker partitionedSplitCountTracker;
-
-    private final AtomicBoolean aborting = new AtomicBoolean(false);
 
     public HttpRemoteTask(Session session,
             TaskId taskId,
@@ -201,6 +197,10 @@ public final class HttpRemoteTask
             this.updateErrorTracker = new RequestErrorTracker(taskId, location, minErrorDuration, maxErrorDuration, errorScheduledExecutor, "updating task");
             this.partitionedSplitCountTracker = requireNonNull(partitionedSplitCountTracker, "partitionedSplitCountTracker is null");
             this.stats = stats;
+
+            PlanNode rootNode = planFragment.getRoot();
+            // add by YJH
+            pendingConditions(rootNode, initialSplits);
 
             for (Entry<PlanNodeId, Split> entry : requireNonNull(initialSplits, "initialSplits is null").entries()) {
                 ScheduledSplit scheduledSplit = new ScheduledSplit(nextSplitId.getAndIncrement(), entry.getKey(), entry.getValue());
@@ -259,6 +259,47 @@ public final class HttpRemoteTask
             this.requestTimeout = new Duration(timeout + taskStatusRefreshMaxWait.toMillis(), MILLISECONDS);
             partitionedSplitCountTracker.setPartitionedSplitCount(getPartitionedSplitCount());
             updateSplitQueueSpace();
+        }
+    }
+
+    // Add by YJH
+    public void pendingConditions(PlanNode rootNode, Multimap<PlanNodeId, Split> splitMap)
+    {
+        if (splitMap.size() == 0) {
+            return;
+        }
+
+        Queue<PlanNode> queue = new LinkedList<>();
+
+        List<TableScanNode> conditionNodes = new LinkedList<>();
+
+        queue.addAll(rootNode.getSources());
+
+        PlanNode temp = null;
+
+        while (queue.size() != 0) {
+            temp = queue.poll();
+            for (PlanNode source : temp.getSources()) {
+                if (source instanceof TableScanNode) {
+                    conditionNodes.add((TableScanNode) source);
+                    continue;
+                }
+                queue.offer(source);
+            }
+        }
+
+        for (TableScanNode node : conditionNodes) {
+            Expression condition = node.getOriginalConstraint();
+            final String tableFullName = node.getTable().getConnectorHandle().toString().replaceAll(":", "-");
+            final String attachString = condition.toString() + "@" + tableFullName;
+            if (!(condition instanceof BooleanLiteral)) {
+                Collection<Split> target = splitMap.get(node.getId());
+                target.forEach(split -> {
+                    if (split.getConnectorSplit().withParam()) {
+                        split.getConnectorSplit().setParam(attachString);
+                    }
+                });
+            }
         }
     }
 

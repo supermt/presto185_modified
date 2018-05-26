@@ -124,6 +124,49 @@ class QueryPlanner
         this.subqueryPlanner = new SubqueryPlanner(analysis, symbolAllocator, idAllocator, lambdaDeclarationToSymbolMap, metadata, session, analysis.getParameters());
     }
 
+    private static List<Symbol> computeOutputs(PlanBuilder builder, List<Expression> outputExpressions)
+    {
+        ImmutableList.Builder<Symbol> outputSymbols = ImmutableList.builder();
+        for (Expression expression : outputExpressions) {
+            outputSymbols.add(builder.translate(expression));
+        }
+        return outputSymbols.build();
+    }
+
+    private static List<Expression> toSymbolReferences(List<Symbol> symbols)
+    {
+        return symbols.stream()
+                .map(Symbol::toSymbolReference)
+                .collect(toImmutableList());
+    }
+
+    private static Map<Expression, Symbol> symbolsForExpressions(PlanBuilder builder, Iterable<? extends Expression> expressions)
+    {
+        return stream(expressions)
+                .distinct()
+                .collect(toImmutableMap(expression -> expression, builder::translate));
+    }
+
+    private static SortOrder toSortOrder(SortItem sortItem)
+    {
+        if (sortItem.getOrdering() == Ordering.ASCENDING) {
+            if (sortItem.getNullOrdering() == NullOrdering.FIRST) {
+                return SortOrder.ASC_NULLS_FIRST;
+            }
+            else {
+                return SortOrder.ASC_NULLS_LAST;
+            }
+        }
+        else {
+            if (sortItem.getNullOrdering() == NullOrdering.FIRST) {
+                return SortOrder.DESC_NULLS_FIRST;
+            }
+            else {
+                return SortOrder.DESC_NULLS_LAST;
+            }
+        }
+    }
+
     public RelationPlan plan(Query query)
     {
         PlanBuilder builder = planQueryBody(query);
@@ -188,6 +231,8 @@ class QueryPlanner
         builder = project(builder, outputs);
         builder = limit(builder, node);
 
+        builder.getRoot().setRoot(true);
+
         return new RelationPlan(
                 builder.getRoot(),
                 analysis.getScope(node),
@@ -240,15 +285,6 @@ class QueryPlanner
                 symbolAllocator.newSymbol("fragment", VARBINARY));
 
         return new DeleteNode(idAllocator.getNextId(), builder.getRoot(), new DeleteHandle(handle, metadata.getTableMetadata(session, handle).getTable()), rowId, outputs);
-    }
-
-    private static List<Symbol> computeOutputs(PlanBuilder builder, List<Expression> outputExpressions)
-    {
-        ImmutableList.Builder<Symbol> outputSymbols = ImmutableList.builder();
-        for (Expression expression : outputExpressions) {
-            outputSymbols.add(builder.translate(expression));
-        }
-        return outputSymbols.build();
     }
 
     private PlanBuilder planQueryBody(Query query)
@@ -857,39 +893,5 @@ class QueryPlanner
         }
 
         return subPlan;
-    }
-
-    private static List<Expression> toSymbolReferences(List<Symbol> symbols)
-    {
-        return symbols.stream()
-                .map(Symbol::toSymbolReference)
-                .collect(toImmutableList());
-    }
-
-    private static Map<Expression, Symbol> symbolsForExpressions(PlanBuilder builder, Iterable<? extends Expression> expressions)
-    {
-        return stream(expressions)
-                .distinct()
-                .collect(toImmutableMap(expression -> expression, builder::translate));
-    }
-
-    private static SortOrder toSortOrder(SortItem sortItem)
-    {
-        if (sortItem.getOrdering() == Ordering.ASCENDING) {
-            if (sortItem.getNullOrdering() == NullOrdering.FIRST) {
-                return SortOrder.ASC_NULLS_FIRST;
-            }
-            else {
-                return SortOrder.ASC_NULLS_LAST;
-            }
-        }
-        else {
-            if (sortItem.getNullOrdering() == NullOrdering.FIRST) {
-                return SortOrder.DESC_NULLS_FIRST;
-            }
-            else {
-                return SortOrder.DESC_NULLS_LAST;
-            }
-        }
     }
 }

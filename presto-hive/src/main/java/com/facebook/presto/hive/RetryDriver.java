@@ -130,6 +130,7 @@ public class RetryDriver
         while (true) {
             attempt++;
 
+
             if (attempt > 1) {
                 retryRunnable.ifPresent(Runnable::run);
             }

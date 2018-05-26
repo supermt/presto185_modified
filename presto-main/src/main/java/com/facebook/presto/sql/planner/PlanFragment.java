@@ -83,6 +83,35 @@ public class PlanFragment
         this.partitioningScheme = requireNonNull(partitioningScheme, "partitioningScheme is null");
     }
 
+    private static Set<PlanNode> findSources(PlanNode node, Iterable<PlanNodeId> nodeIds)
+    {
+        ImmutableSet.Builder<PlanNode> nodes = ImmutableSet.builder();
+        findSources(node, ImmutableSet.copyOf(nodeIds), nodes);
+        return nodes.build();
+    }
+
+    private static void findSources(PlanNode node, Set<PlanNodeId> nodeIds, ImmutableSet.Builder<PlanNode> nodes)
+    {
+        if (nodeIds.contains(node.getId())) {
+            nodes.add(node);
+        }
+
+        node.getSources().stream()
+                .flatMap(source -> findSources(source, nodeIds).stream())
+                .forEach(nodes::add);
+    }
+
+    private static void findRemoteSourceNodes(PlanNode node, Builder<RemoteSourceNode> builder)
+    {
+        for (PlanNode source : node.getSources()) {
+            findRemoteSourceNodes(source, builder);
+        }
+
+        if (node instanceof RemoteSourceNode) {
+            builder.add((RemoteSourceNode) node);
+        }
+    }
+
     @JsonProperty
     public PlanFragmentId getId()
     {
@@ -142,35 +171,6 @@ public class PlanFragment
     public List<RemoteSourceNode> getRemoteSourceNodes()
     {
         return remoteSourceNodes;
-    }
-
-    private static Set<PlanNode> findSources(PlanNode node, Iterable<PlanNodeId> nodeIds)
-    {
-        ImmutableSet.Builder<PlanNode> nodes = ImmutableSet.builder();
-        findSources(node, ImmutableSet.copyOf(nodeIds), nodes);
-        return nodes.build();
-    }
-
-    private static void findSources(PlanNode node, Set<PlanNodeId> nodeIds, ImmutableSet.Builder<PlanNode> nodes)
-    {
-        if (nodeIds.contains(node.getId())) {
-            nodes.add(node);
-        }
-
-        node.getSources().stream()
-                .flatMap(source -> findSources(source, nodeIds).stream())
-                .forEach(nodes::add);
-    }
-
-    private static void findRemoteSourceNodes(PlanNode node, Builder<RemoteSourceNode> builder)
-    {
-        for (PlanNode source : node.getSources()) {
-            findRemoteSourceNodes(source, builder);
-        }
-
-        if (node instanceof RemoteSourceNode) {
-            builder.add((RemoteSourceNode) node);
-        }
     }
 
     public PlanFragment withBucketToPartition(Optional<int[]> bucketToPartition)
